@@ -283,6 +283,8 @@ class LiveExecutor:
         status = d.get("status")
         if status not in ("new", "pending_retry"):
             return None
+        if self.risk.blocked_today(self.clock.now_ms()):
+            return None  # no attempts (and no retries used up) until the next UTC day
         if status == "pending_retry" and d["attempts"] > self.params.max_retries:
             d["status"] = "failed"
             self._event(
@@ -362,6 +364,14 @@ class LiveExecutor:
     def _min_usd(self, symbol: str) -> float:
         return max(self.filters[symbol].min_notional_f() * DUST_MARGIN, 1e-9)
 
+    def _why_not_sent(self) -> str:
+        if self.risk.blocked:
+            return f"not sent: risk limit - {self.risk.state.block_reason}"
+        return "not sent: execution stopped"
+
+    def _dust_usd(self) -> float:
+        return max(max(self._min_usd(s) for s in SYMBOLS), self.params.min_trade_usd)
+
     async def _attempt(self, d: dict[str, Any]) -> str:
         p = self.params
         t0 = time.monotonic()
@@ -382,7 +392,8 @@ class LiveExecutor:
         # 2) size the trade
         dv = trade_size(w_target, total, px)
         if abs(dv) < p.min_trade_usd:
-            return "done" if self.pending_usdt < self._min_usd(SYMBOLS[0]) else "pending_retry"
+            # Leftover USDT below this is dust; the next decision spends it first.
+            return "done" if self.pending_usdt < self._dust_usd() else "pending_retry"
         sell_asset, buy_asset = leg_assets(dv)
         sell_sym, buy_sym = SYMBOL_OF[sell_asset], SYMBOL_OF[buy_asset]
         remaining = abs(dv)
@@ -415,7 +426,7 @@ class LiveExecutor:
                     self._event(
                         "WARNING",
                         "leg2_failed",
-                        f"decision {d['id']}: buy leg on {buy_sym} failed ({(r2.error or r2.status) if r2 else 'not sent'}); "
+                        f"decision {d['id']}: buy leg on {buy_sym} failed ({(r2.error or r2.status) if r2 else self._why_not_sent()}); "
                         f"keeping {self.pending_usdt:.2f} USDT, retrying next bar",
                         decision_id=d["id"],
                     )
@@ -459,8 +470,12 @@ class LiveExecutor:
             self.pending_usdt = u
         v = pair_value(total, px) + u
         theta_part = min(max(w_target * v - total.get("THETA", 0.0) * px["THETA"], 0.0), u)
-        parts = (("THETA", theta_part), ("TFUEL", u - theta_part))
-        for asset, amount in parts:
+        parts = {"THETA": theta_part, "TFUEL": u - theta_part}
+        if any(0 < x < self._min_usd(SYMBOL_OF[a]) for a, x in parts.items()):
+            # A part below minNotional cannot be bought on its own: give everything to the larger part.
+            big = max(parts, key=lambda a: parts[a])
+            parts = {a: (u if a == big else 0.0) for a in parts}
+        for asset, amount in parts.items():
             sym = SYMBOL_OF[asset]
             if amount < self._min_usd(sym):
                 continue
@@ -469,7 +484,7 @@ class LiveExecutor:
                 self._event(
                     "WARNING",
                     "leg2_failed",
-                    f"decision {d['id']}: retry of buy leg on {sym} failed ({(r.error or r.status) if r else 'not sent'}); "
+                    f"decision {d['id']}: retry of buy leg on {sym} failed ({(r.error or r.status) if r else self._why_not_sent()}); "
                     f"keeping {self.pending_usdt:.2f} USDT",
                     decision_id=d["id"],
                 )

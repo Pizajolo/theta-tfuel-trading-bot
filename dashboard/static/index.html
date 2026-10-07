@@ -462,8 +462,10 @@ function renderCards(ov) {
         stat("Excess YTD", fmt.pct((s.excess_ytd || {})[prim]), signClass((s.excess_ytd || {})[prim]))));
     const ref = s.reference;
     if (ref) {
-      const range = `${fmt.pct(ref.lo, 1)} .. ${fmt.pct(ref.hi, 1)}`;
-      const scope = ref.label + (ref.days < 300 ? `, prorated to ${ref.days.toFixed(0)} days` : "");
+      const early = ref.status === "neutral" && ref.full_range;
+      const range = early ? `${fmt.pct(ref.full_range[0], 0)} .. ${fmt.pct(ref.full_range[1], 0)}`
+                          : `${fmt.pct(ref.lo, 1)} .. ${fmt.pct(ref.hi, 1)}`;
+      const scope = ref.label + (early ? "" : ref.days < 300 ? `, prorated to ${ref.days.toFixed(0)} days` : "");
       card.append(el("div", { class: "ref st-" + ref.status }, el("span", { class: "dot" }),
         el("div", {}, el("div", {}, `Backtest reference ${range} (${scope})`),
           el("div", { class: "sub" }, `${ref.year} result ${fmt.pct(ref.value)} — ${ref.text}`))));

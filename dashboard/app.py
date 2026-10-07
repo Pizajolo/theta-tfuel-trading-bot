@@ -39,7 +39,9 @@ def reference_status(inst: str, summary: dict, now_ms: int) -> dict | None:
     if pr is None:
         return None
     lo, hi, label = pr
-    if ytd >= lo:
+    if days < 7:
+        status, text = "neutral", f"too early to compare ({days:.1f} days of data)"
+    elif ytd >= lo:
         status, text = "good", "within or above the reference range"
     elif ytd >= 0:
         status, text = "warning", "positive but below the reference range"
@@ -98,6 +100,9 @@ def create_app(data_dir: Path) -> FastAPI:
         if not win:
             return {"points": [], "markers": {}, "ladder": [], "entry": None}
         start, end = win
+        first = reader.first_bar_ms()
+        if first is not None and first > start:
+            start = first  # do not stretch a short history across the whole range
         stride = pick_stride((end - start) / MINUTE_MS)
         bars = reader.bars(start, end, stride)
         insts = reader.instances()
@@ -158,6 +163,9 @@ def create_app(data_dir: Path) -> FastAPI:
         if not win:
             return {"series": {}}
         start, end = win
+        firsts = [f for f in (reader.first_equity_ms(i) for i in reader.instances()) if f is not None]
+        if firsts and min(firsts) > start:
+            start = min(firsts)
         stride = pick_stride((end - start) / MINUTE_MS, base=5)
         series: dict[str, dict[str, list]] = {}
         for inst in reader.instances():

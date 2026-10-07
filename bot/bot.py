@@ -123,6 +123,21 @@ class Bot:
             return None
         return prices(th, tf, self.bnb_price)
 
+    async def fetch_px(self) -> dict[str, float] | None:
+        """Current prices: stream mids, else REST book tickers (e.g. right after a restart)."""
+        px = self.current_px()
+        if px is not None:
+            return px
+        try:
+            mids = {}
+            for sym in SYMBOLS:
+                t = await self.client.book_ticker(sym)
+                mids[sym] = (float(t["bidPrice"]) + float(t["askPrice"])) / 2.0
+            return prices(mids[THETA], mids[TFUEL], self.bnb_price)
+        except Exception as exc:
+            log.warning("price fetch failed: %r", exc)
+            return None
+
     def kill_switch_on(self) -> bool:
         return self.settings.kill_switch or self.settings.kill_file().exists()
 
@@ -431,9 +446,9 @@ class Bot:
             await ex.reconcile()
             inst.attach_executor(ex)
             total, _ = await ex.refresh_balances()
-            px = self.current_px()
+            px = await self.fetch_px()
             if px is None:
-                self.storage.event("ERROR", "live_refused", "no market prices yet", instance=name)
+                self.storage.event("ERROR", "live_refused", "no market prices available; retrying in 60 s", instance=name)
                 inst.executor = None
                 return
             if not inst.live_active:
@@ -442,11 +457,24 @@ class Bot:
                 inst.live_port.bal = dict(total)  # type: ignore[union-attr]
                 inst.live_suspended = False
                 self.storage.event("WARNING", "live_resumed", f"LIVE trading resumed; w={theta_weight(total, px):.3f}", instance=name)
+                self._requeue_live_decision(inst, px, now)
                 inst.save()
         elif inst.live_suspended:
             inst.live_suspended = False
             self.storage.event("WARNING", "live_resumed", "kill switch cleared: LIVE trading resumed", instance=name)
             inst.save()
+
+    def _requeue_live_decision(self, inst: Instance, px: dict[str, float], now: int) -> None:
+        """A live decision taken while no executor was attached must not be lost."""
+        ld = inst.last_decision
+        ex = inst.executor
+        if not ld or ld.get("mode") != "live" or ex is None:
+            return
+        if ex.decision is not None and ex.decision.get("id") == ld.get("decision_id"):
+            return
+        ex.new_decision(ld["decision_id"], float(ld["w_target"]), px, now)
+        self.storage.event("WARNING", "live_resync", f"re-queued live decision {ld['decision_id']} "
+                           f"(w_target={ld['w_target']:.3f}) taken while live execution was unavailable", instance=inst.name)
 
     # ---- loops --------------------------------------------------------------------------------
     async def kill_loop(self) -> None:

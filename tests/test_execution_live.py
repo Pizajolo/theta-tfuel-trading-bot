@@ -259,6 +259,21 @@ def test_risk_limit_trades_per_day(tmp_path):
     assert len(h.fx.order_log) == 1  # sell filled, buy blocked
     assert h.ex.pending_usdt > 200  # USDT kept for the buy leg
     assert h.risk.blocked
+    assert any("risk limit" in e["message"] for e in h.events("leg2_failed"))
+
+    async def bars():
+        return [h.ex.pump(allowed=True) for _ in range(3)]
+
+    assert run(bars()) == [None, None, None]  # no attempts burnt while blocked
+    assert d["attempts"] == 1 and d["status"] == "pending_retry"
+    h.clock.set(T0 + 86_400_000)  # next UTC day
+
+    async def next_day():
+        assert h.ex.pump(allowed=True) == "retry"
+        await h.ex.task
+
+    run(next_day())
+    assert d["status"] == "done" and h.ex.pending_usdt < 5
 
 
 def test_risk_limit_turnover():
@@ -363,3 +378,24 @@ def test_unresolvable_order_stays_in_flight_until_resolved(tmp_path):
     ids = [o["clientOrderId"] for o in h.fx.order_log]
     assert ids.count("s1k-2601011200-1-0") == 1
     assert h.w() == pytest.approx(0.75, abs=0.005)
+
+
+def test_small_leftover_usdt_is_spent_not_split_below_min_notional(tmp_path):
+    """8 USDT left from a sell leg must not be split into two sub-minNotional buys forever."""
+    h = Harness(tmp_path, balances={"THETA": 250.0, "TFUEL": 15_000.0, "USDT": 8.0})
+    h.ex.pending_usdt = 8.0
+    # w = 0.25 already; splitting by need gives THETA ~4 USDT and TFUEL ~4 USDT, both below minNotional
+    d = h.decide(0.252)
+    assert run(h.ex.run_attempt(d)) == "done"
+    assert h.ex.pending_usdt < 5.0
+    assert len(h.fx.order_log) == 1 and h.fx.order_log[0]["side"] == "BUY"
+
+
+def test_dust_below_min_trade_finishes_the_decision(tmp_path):
+    h = Harness(tmp_path, balances={"THETA": 250.0, "TFUEL": 15_000.0, "USDT": 7.0})
+    h.ex.pending_usdt = 7.0
+    h.fx.partial_fill = 0.0  # nothing can be bought
+    d = h.decide(0.25)
+    assert run(h.ex.run_attempt(d)) == "pending_retry"  # leg-2 retry failed (no fill)
+    h.ex.pending_usdt = 4.0  # below minNotional: dust
+    assert run(h.ex.run_attempt(d)) == "done"

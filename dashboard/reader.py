@@ -120,6 +120,23 @@ class DataReader:
                 return iso_to_ms(tail[-1]["ts"])
         return None
 
+    def _first_ts(self, directory: Path, prefix: str) -> int | None:
+        files = self.daily_files(directory, prefix)
+        if not files:
+            return None
+        with open(files[0][1], encoding="utf-8") as f:
+            line = f.readline()
+        try:
+            return iso_to_ms(json.loads(line)["ts"])
+        except (ValueError, KeyError):
+            return None
+
+    def first_bar_ms(self) -> int | None:
+        return self._first_ts(self.root / "market", "bars")
+
+    def first_equity_ms(self, inst: str) -> int | None:
+        return self._first_ts(self.root / "instances" / inst, "equity")
+
     def window(self, rng: str) -> tuple[int, int] | None:
         """(start_ms, end_ms) ending at the latest bar (so replays display correctly)."""
         end = self.last_bar_ms()

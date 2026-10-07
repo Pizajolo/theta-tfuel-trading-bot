@@ -44,6 +44,10 @@ class RiskManager:
     def blocked(self) -> bool:
         return self.state.blocked
 
+    def blocked_today(self, now_ms: int) -> bool:
+        """True while today's block is in force (the next UTC day lifts it)."""
+        return self.state.blocked and self.state.date == ms_to_date(now_ms)
+
     def turnover_limit_usd(self) -> float:
         return self.params.max_daily_turnover_pct / 100.0 * self.state.day_start_value_usd
 

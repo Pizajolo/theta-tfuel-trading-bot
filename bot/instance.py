@@ -151,7 +151,7 @@ class Instance:
         self.paper_exec.pending_worst = None
 
     # ---- ladder log ---------------------------------------------------------------------------
-    def log_ladder(self, u: LadderUpdate, ts_ms: int | None = None) -> None:
+    def log_ladder(self, u: LadderUpdate, ts_ms: int | None = None, emit_event: bool = True) -> None:
         if self.ladder_logged_until is not None and u.date <= self.ladder_logged_until:
             return
         self.ladder_logged_until = u.date
@@ -160,7 +160,7 @@ class Instance:
             self.name, ts, date=u.date, lr_day=u.lr_day, ema60=u.ema, D=u.D,
             ladder_w_prev=u.w_prev, ladder_w=u.w_new, warm=u.warm,
         )
-        if u.w_new != u.w_prev:
+        if u.w_new != u.w_prev and emit_event:  # warm-up history goes to ladder.jsonl only
             self.storage.event(
                 "INFO", "ladder_change", f"ladder weight {u.w_prev:.2f} -> {u.w_new:.2f} (D={u.D:+.4f})",
                 instance=self.name, ts_ms=ts, date=u.date,
@@ -171,7 +171,7 @@ class Instance:
         for date, lr in closes:
             u = self.engine.feed_daily_close(date, lr)
             if u:
-                self.log_ladder(u)
+                self.log_ladder(u, emit_event=False)
                 n += 1
         return n
 
@@ -182,7 +182,7 @@ class Instance:
         decided_at = bar.close_ms
         sig = self.engine.feed_bar(ts, bar.lr, bar.stale)
         for u in sig.ladder_updates:
-            self.log_ladder(u)
+            self.log_ladder(u, emit_event=phase != "warmup")
         self.last_signal = sig
         self.last_px = px
         self.last_bar = bar
@@ -270,6 +270,12 @@ class Instance:
         dvs = self.paper_exec.execute_decision(decision_id, sig.w_target, self.paper, bar, ts_ms, self.mode)
         if self.live_active and self.executor is not None:
             self.executor.new_decision(decision_id, sig.w_target, px, ts_ms)
+        elif self.live_active:
+            self.storage.event(
+                "WARNING", "live_unavailable",
+                f"decision {decision_id}: live execution unavailable; it is queued until live trading resumes",
+                instance=self.name, ts_ms=ts_ms,
+            )
         self.last_target = sig.w_target
         self.last_decision = {k: rec[k] for k in ("decision_id", "ts", "reason", "w_from", "w_target", "dv_usd", "mode")}
         self.last_decision["dv_by_variant"] = dvs
@@ -290,7 +296,7 @@ class Instance:
             "active": self.live_active,
             "suspended": self.live_suspended,
             "activated": ms_to_iso(self.live_activated_ms),
-            "risk": self.risk.to_dict(),
+            "risk": dict(self.risk.to_dict(), blocked=self.risk.blocked_today(now_ms)),
         }
         ex = self.executor
         if ex is not None:
