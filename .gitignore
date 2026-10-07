@@ -1,0 +1,21 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# runtime data (never commit)
+data/
+data_replay/
+data_*/
+*.xlsx
+!tests/fixtures/*.xlsx
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+.coverage
+htmlcov/
