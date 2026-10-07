@@ -268,7 +268,10 @@ def load_settings(env_file: str | Path | None = ".env", environ: Mapping[str, st
     file_values: dict[str, str] = {}
     env_path = Path(env_file) if env_file else None
     if env_path is not None and env_path.exists():
-        file_values = {k: v for k, v in dotenv_values(env_path).items() if v is not None}
+        # python-dotenv returns the comment text for "KEY=   # comment"; treat that as empty.
+        file_values = {
+            k: ("" if v.lstrip().startswith("#") else v) for k, v in dotenv_values(env_path).items() if v is not None
+        }
     proc = dict(os.environ if environ is None else environ)
     env: dict[str, str] = {**file_values, **{k: v for k, v in proc.items() if v is not None}}
 

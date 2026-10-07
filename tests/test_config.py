@@ -72,3 +72,12 @@ def test_env_file_and_process_env_precedence(tmp_path):
     assert s.instance("s1k").strategy.overlay_entry == 0.08 and s.kill_switch
     s = load_settings(env, environ={"DATA_DIR": str(tmp_path), "OVERLAY_ENTRY": "0.09"})
     assert s.instance("s1k").strategy.overlay_entry == 0.09
+
+
+def test_env_file_inline_comments(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("LIVE_CONFIRM=                      # must equal the phrase\n"
+                   "FEE_RATE=0.00075   # with BNB discount\nS1K_LIVE=true # comment\n")
+    s = load_settings(env, environ={"DATA_DIR": str(tmp_path)})
+    assert s.live_confirm == "" and not s.live_confirmed
+    assert s.instance("s1k").execution.fee_rate == 0.00075 and s.instance("s1k").live_requested

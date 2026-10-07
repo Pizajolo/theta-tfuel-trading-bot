@@ -1,0 +1,25 @@
+services:
+  bot:
+    build: .
+    command: ["python", "-m", "bot", "--env", "/app/.env", "run"]
+    restart: unless-stopped
+    environment:
+      DATA_DIR: /app/data
+    volumes:
+      # mounted as a file (not env_file) so edits are picked up by the 60 s hot reload
+      - ./.env:/app/.env:ro
+      - ./data:/app/data
+    stop_grace_period: 60s
+
+  dashboard:
+    build: .
+    command: ["python", "-m", "dashboard", "--env", "/app/.env", "--host", "0.0.0.0", "--port", "8050"]
+    restart: unless-stopped
+    environment:
+      DATA_DIR: /app/data
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./data:/app/data:ro
+    ports:
+      # published on the host's loopback only; use an SSH tunnel to view it remotely
+      - "127.0.0.1:8050:8050"

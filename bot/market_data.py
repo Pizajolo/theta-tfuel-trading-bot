@@ -152,6 +152,12 @@ def join_klines(
 OnBar = Callable[[JointBar, str], Awaitable[None]]
 
 
+def _short(exc: BaseException) -> str:
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    text = f"{type(exc).__name__}" + (f" (HTTP {status})" if status else f": {exc}")
+    return text[:300]
+
+
 class MarketData:
     def __init__(
         self,
@@ -179,6 +185,9 @@ class MarketData:
         self.last_msg_ms = 0
         self.reconnects = 0
         self.last_bar_processed_ms: int | None = None
+        self._backfill_failures = 0
+        self._backfill_fail_logged_ms = 0
+        self._ws_fail_logged_ms = 0
 
     # ---- helpers -------------------------------------------------------------------------
     def stream_url(self) -> str:
@@ -314,8 +323,11 @@ class MarketData:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # network errors, handshake failures, closed connections
-                if not self._stop.is_set():
-                    self.storage.event("WARNING", "ws_disconnect", f"market data stream error: {exc!r}")
+                now = self.clock.now_ms()
+                if not self._stop.is_set() and (self.ws_connected or now - self._ws_fail_logged_ms >= 300_000):
+                    # one WARNING per disconnect, then at most one per 5 minutes while reconnects fail
+                    self._ws_fail_logged_ms = now
+                    self.storage.event("WARNING", "ws_disconnect", f"market data stream error: {_short(exc)}")
             finally:
                 self.ws_connected = False
                 self._ws = None
@@ -420,8 +432,19 @@ class MarketData:
                     if start <= t <= to_ms and sym in entry:
                         rows[sym].setdefault(t, entry[sym])
         except Exception as exc:
-            self.storage.event("WARNING", "backfill_failed", f"REST backfill failed: {exc!r}")
+            now = self.clock.now_ms()
+            self._backfill_failures += 1
+            if now - self._backfill_fail_logged_ms >= 300_000:  # at most one WARNING per 5 minutes
+                self._backfill_fail_logged_ms = now
+                self.storage.event(
+                    "WARNING", "backfill_failed",
+                    f"REST backfill failed ({self._backfill_failures} attempt(s) so far), retrying: {exc!r}",
+                )
             return 0
+        if self._backfill_failures:
+            self.storage.event("INFO", "backfill_recovered", f"REST backfill working again after {self._backfill_failures} failure(s)")
+            self._backfill_failures = 0
+            self._backfill_fail_logged_ms = 0
         bars = join_klines(rows, start, to_ms, self.last_close, now - SYNTH_AFTER_MS)
         n = 0
         for bar in bars:

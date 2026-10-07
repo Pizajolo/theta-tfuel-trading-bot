@@ -1,0 +1,8 @@
+# runtime (pinned)
+httpx==0.28.1
+websockets==17.2
+fastapi==0.142.2
+starlette==1.6.0
+uvicorn==0.53.0
+python-dotenv==1.2.3
+openpyxl==3.1.5
