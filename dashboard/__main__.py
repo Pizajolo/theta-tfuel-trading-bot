@@ -5,8 +5,8 @@ import os
 from pathlib import Path
 
 import uvicorn
-from dotenv import dotenv_values
 
+from bot.config import ConfigError, read_env_file
 from dashboard.app import create_app
 
 
@@ -17,7 +17,10 @@ def main() -> None:
     ap.add_argument("--host")
     ap.add_argument("--port", type=int)
     a = ap.parse_args()
-    env = {k: v for k, v in (dotenv_values(a.env) if Path(a.env).exists() else {}).items() if v is not None}
+    try:
+        env = read_env_file(Path(a.env)) if Path(a.env).exists() else {}
+    except ConfigError as exc:
+        raise SystemExit(f"configuration error: {exc}") from None
     env.update({k: v for k, v in os.environ.items()})
     data_dir = a.data_dir or env.get("DATA_DIR") or "./data"
     host = a.host or env.get("DASHBOARD_HOST") or "127.0.0.1"

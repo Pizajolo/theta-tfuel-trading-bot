@@ -96,7 +96,8 @@ events); strategy parameters, capital and API keys need a restart (the bot logs 
 
 ```bash
 cp .env.example .env && mkdir -p data
-sudo chown 1000:1000 data                # the containers run as uid 1000
+sudo chown 1000:1000 data .env           # the containers run as uid 1000
+sudo chmod 600 .env                      # secrets: readable only by uid 1000 (edit with sudo)
 docker compose up -d --build             # services: bot + dashboard, sharing ./data
 docker compose logs -f bot
 ```

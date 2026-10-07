@@ -264,14 +264,24 @@ def _validate_params(where: str, s: StrategyParams, e: ExecutionParams, r: RiskP
         raise ConfigError(f"{where}: " + "; ".join(problems))
 
 
+def read_env_file(path: Path) -> dict[str, str]:
+    """Values of a .env file; a clear ConfigError when the file is not readable."""
+    try:
+        raw = dotenv_values(path)
+    except PermissionError as exc:
+        raise ConfigError(
+            f"cannot read {path}: permission denied. In Docker the bot runs as uid 1000, so the file must be "
+            f"readable by it: sudo chown 1000:1000 .env && sudo chmod 600 .env"
+        ) from exc
+    # python-dotenv returns the comment text for "KEY=   # comment"; treat that as empty.
+    return {k: ("" if v.lstrip().startswith("#") else v) for k, v in raw.items() if v is not None}
+
+
 def load_settings(env_file: str | Path | None = ".env", environ: Mapping[str, str] | None = None) -> Settings:
     file_values: dict[str, str] = {}
     env_path = Path(env_file) if env_file else None
     if env_path is not None and env_path.exists():
-        # python-dotenv returns the comment text for "KEY=   # comment"; treat that as empty.
-        file_values = {
-            k: ("" if v.lstrip().startswith("#") else v) for k, v in dotenv_values(env_path).items() if v is not None
-        }
+        file_values = {k: v for k, v in read_env_file(env_path).items()}
     proc = dict(os.environ if environ is None else environ)
     env: dict[str, str] = {**file_values, **{k: v for k, v in proc.items() if v is not None}}
 

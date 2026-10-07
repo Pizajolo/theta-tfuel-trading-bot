@@ -81,3 +81,17 @@ def test_env_file_inline_comments(tmp_path):
     s = load_settings(env, environ={"DATA_DIR": str(tmp_path)})
     assert s.live_confirm == "" and not s.live_confirmed
     assert s.instance("s1k").execution.fee_rate == 0.00075 and s.instance("s1k").live_requested
+
+
+def test_unreadable_env_file_gives_clear_error(tmp_path, monkeypatch):
+    import bot.config as cfg
+
+    env = tmp_path / ".env"
+    env.write_text("KILL_SWITCH=false\n")
+
+    def denied(path):
+        raise PermissionError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr(cfg, "dotenv_values", denied)
+    with pytest.raises(ConfigError, match="chown 1000:1000"):
+        load_settings(env, environ={"DATA_DIR": str(tmp_path)})
