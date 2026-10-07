@@ -34,8 +34,12 @@ class Harness:
         self.ex = LiveExecutor(
             "s1k", self.fx, self.filters, self.params, self.risk, self.storage,
             portfolio_fn=lambda: self.port, book_fn=lambda s: None, price_fn=self.price,
-            save_fn=self.save, clock=self.clock, state=state,
+            save_fn=self.save, clock=self.clock, state=state, sleep=self._nosleep,
         )
+
+    @staticmethod
+    async def _nosleep(_seconds):
+        return None
 
     def price(self, asset):
         return {"USDT": 1.0, "THETA": self.fx.prices["THETAUSDT"], "TFUEL": self.fx.prices["TFUELUSDT"],
@@ -329,3 +333,33 @@ def test_bnb_fee_warning(tmp_path):
                 balances={"THETA": 500.0, "TFUEL": 10_000.0, "BNB": 0.001})
     run(h.ex.check_bnb())
     assert h.events("bnb_low")
+
+
+def test_unresolvable_order_stays_in_flight_until_resolved(tmp_path):
+    h = Harness(tmp_path)
+    h.fx.lose_response_next["TFUELUSDT"] = 1
+    real_get = h.fx.get_order
+    outage = {"left": 5}
+
+    async def flaky_get(symbol, cid):
+        if outage["left"] > 0:
+            outage["left"] -= 1
+            raise BinanceAPIError(503, None, "network down")
+        return await real_get(symbol, cid)
+
+    h.fx.get_order = flaky_get
+    d = h.decide(0.75)
+    assert run(h.ex.run_attempt(d)) == "pending_retry"
+    assert h.ex.inflight and h.ex.inflight["client_order_id"] == "s1k-2601011200-1-0"
+    assert any(e["kind"] == "order_unresolved" for e in h.events())
+    assert len(h.fx.order_log) == 1  # nothing else was sent
+
+    async def next_bar():
+        assert h.ex.pump(allowed=True) == "retry"
+        await h.ex.task
+
+    run(next_bar())
+    assert h.ex.inflight is None and d["status"] == "done"
+    ids = [o["clientOrderId"] for o in h.fx.order_log]
+    assert ids.count("s1k-2601011200-1-0") == 1
+    assert h.w() == pytest.approx(0.75, abs=0.005)

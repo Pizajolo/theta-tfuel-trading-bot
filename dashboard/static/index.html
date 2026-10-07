@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>THETA/TFUEL Ratio Bot</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --surface-2: #f3f2ef;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11,11,11,0.10);
+  --s1: #2a78d6;   /* s1k */
+  --s2: #eb6834;   /* s4k */
+  --s3: #1baf7a;   /* 3-day EMA */
+  --good: #0ca30c;
+  --good-text: #006300;
+  --warning: #fab219;
+  --critical: #d03b3b;
+  --badge-paper: #e8e7e3;
+  --shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #232322;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255,255,255,0.10);
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+    --good-text: #0ca30c;
+    --badge-paper: #383835;
+    --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232322; --ink: #ffffff; --ink-2: #c3c2b7;
+  --muted: #898781; --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --good-text: #0ca30c; --badge-paper: #383835; --shadow: none;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--page); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.hidden { display: none !important; }
+header.top {
+  position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+  justify-content: space-between; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.brand { font-weight: 600; font-size: 15px; }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+  background: var(--surface-2); color: var(--ink-2); font-size: 12px; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.st-good .dot { background: var(--good); }
+.st-warning .dot { background: var(--warning); }
+.st-critical .dot { background: var(--critical); }
+.st-critical { color: var(--ink); font-weight: 600; }
+main { max-width: 1280px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+main.loading .chart-box { opacity: 0.6; transition: opacity .2s; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.card, .panel {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow);
+  padding: 16px; min-width: 0;
+}
+.card-head { display: flex; align-items: center; gap: 10px; }
+.card-head h3 { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+.swatch { width: 12px; height: 3px; border-radius: 2px; display: inline-block; }
+.badge {
+  margin-left: auto; padding: 2px 10px; border-radius: 6px; font-size: 12px; font-weight: 700; letter-spacing: .04em;
+  background: var(--badge-paper); color: var(--ink-2);
+}
+.badge.live { background: var(--critical); color: #fff; }
+.badge.killed { background: var(--warning); color: #0b0b0b; margin-left: 6px; }
+.hero { margin: 12px 0 2px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.hero-num { font-size: 48px; font-weight: 600; line-height: 1; }
+.hero-label { color: var(--ink-2); }
+.sub { color: var(--ink-2); font-size: 13px; margin: 2px 0 0; }
+.tokens { margin: 10px 0; display: grid; gap: 2px; }
+.tokens div { font-variant-numeric: tabular-nums; }
+.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px 12px; margin: 12px 0 0; }
+.stat dt { color: var(--muted); font-size: 12px; }
+.stat dd { margin: 0; font-weight: 600; }
+.wbar { position: relative; height: 8px; border-radius: 4px; background: var(--surface-2); margin: 14px 0 4px; }
+.wbar .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; }
+.wbar .tgt { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink); border-radius: 1px; }
+.wlegend { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+.ref { margin-top: 12px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); display: flex; gap: 8px; align-items: flex-start; }
+.ref .dot { margin-top: 6px; }
+h2 { font-size: 15px; margin: 0 0 2px; }
+.filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.filters .label { color: var(--ink-2); margin-right: 4px; }
+button.seg {
+  font: inherit; border: 1px solid var(--border); background: var(--surface); color: var(--ink);
+  padding: 4px 12px; border-radius: 6px; cursor: pointer;
+}
+button.seg[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); font-weight: 600; }
+.chart-box { position: relative; height: 360px; margin-top: 10px; }
+.chart-box.small { height: 260px; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+details { margin-top: 10px; }
+summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
+.table-wrap { overflow-x: auto; max-height: 420px; overflow-y: auto; margin-top: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--surface); color: var(--muted); font-weight: 600; }
+td.num, th.num { text-align: right; }
+tr.lv-WARNING td { background: color-mix(in srgb, var(--warning) 14%, transparent); }
+tr.lv-ERROR td, tr.lv-CRITICAL td { background: color-mix(in srgb, var(--critical) 14%, transparent); }
+td.msg { white-space: normal; min-width: 280px; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; align-items: center; }
+select { font: inherit; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--ink); }
+.empty { color: var(--muted); padding: 24px 0; text-align: center; }
+footer { color: var(--muted); font-size: 12px; text-align: center; padding: 8px 16px 24px; }
+.pos { color: var(--good-text); }
+.neg { color: var(--critical); }
+@media (max-width: 600px) {
+  .hero-num { font-size: 40px; }
+  .chart-box { height: 300px; }
+}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">THETA/TFUEL ratio bot</div>
+  <div class="pills">
+    <span class="pill" id="clock">UTC --:--:--</span>
+    <span class="pill" id="fresh"><span class="dot"></span><span class="t">data: -</span></span>
+    <span class="pill" id="ws"><span class="dot"></span><span class="t">WebSocket: -</span></span>
+    <span class="pill" id="kill"><span class="dot"></span><span class="t">kill switch: -</span></span>
+    <span class="pill hidden" id="replay"><span class="dot"></span><span class="t">REPLAY data</span></span>
+    <span class="pill hidden" id="testnet"><span class="dot"></span><span class="t">TESTNET</span></span>
+  </div>
+</header>
+
+<main id="main">
+  <section class="cards" id="cards"><div class="card empty">Waiting for data in DATA_DIR…</div></section>
+
+  <div class="filters" role="group" aria-label="Time range">
+    <span class="label">Range</span>
+    <button class="seg" data-range="24h">24 hours</button>
+    <button class="seg" data-range="7d">7 days</button>
+    <button class="seg" data-range="30d">30 days</button>
+    <button class="seg" data-range="all">All</button>
+    <span class="sub" id="rangeInfo"></span>
+  </div>
+
+  <section class="panel">
+    <h2>Ratio THETA / TFUEL</h2>
+    <p class="sub" id="ratioSub">R with the 3-day EMA and its ±entry bands, the 60-day EMA with the ladder bands, and each instance's rebalances (▲ more THETA, ▼ less THETA).</p>
+    <div class="chart-box"><canvas id="ratioChart" aria-label="Ratio chart" role="img"></canvas></div>
+    <details><summary>Table view</summary><div class="table-wrap" id="ratioTable"></div></details>
+  </section>
+
+  <section class="panel">
+    <h2>Excess vs HODL</h2>
+    <p class="sub">Primary portfolio per instance as a thick line; the other fill variants as thin lines (mid = optimistic, worst = pessimistic).</p>
+    <div class="chart-box"><canvas id="excessChart" aria-label="Excess chart" role="img"></canvas></div>
+    <details><summary>Table view</summary><div class="table-wrap" id="excessTable"></div></details>
+  </section>
+
+  <section class="panel">
+    <h2>THETA weight</h2>
+    <p class="sub">Current weight w (solid) and target weight w_target (dashed, stepped) of each primary portfolio.</p>
+    <div class="chart-box"><canvas id="weightChart" aria-label="Weight chart" role="img"></canvas></div>
+    <details><summary>Table view</summary><div class="table-wrap" id="weightTable"></div></details>
+  </section>
+
+  <section class="panel hidden" id="comparePanel">
+    <h2>Live vs paper</h2>
+    <p class="sub">Live excess against the touch-fill paper shadow since live activation, and the realised slippage of live fills vs mid at decision.</p>
+    <div class="two">
+      <div><div class="chart-box small"><canvas id="compareChart" aria-label="Live vs paper" role="img"></canvas></div></div>
+      <div><div class="chart-box small"><canvas id="slipChart" aria-label="Slippage distribution" role="img"></canvas></div></div>
+    </div>
+    <div class="sub" id="compareStats"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Decisions and orders</h2>
+    <div class="tabs" id="instTabs"></div>
+    <h3 class="sub">Last 50 decisions</h3>
+    <div class="table-wrap" id="decisionsTable"></div>
+    <div class="tabs">
+      <h3 class="sub" style="margin:0">Last 50 orders</h3>
+      <label class="sub">variant <select id="variantSel"></select></label>
+    </div>
+    <div class="table-wrap" id="ordersTable"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Events</h2>
+    <p class="sub">Last 50 events; warnings and errors are highlighted.</p>
+    <div class="table-wrap" id="eventsTable"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Backtest reference</h2>
+    <p class="sub" id="refNote"></p>
+    <div class="table-wrap" id="refTable"></div>
+  </section>
+</main>
+<footer id="footer">Reads only the JSON files in DATA_DIR · refreshes every 30 s</footer>
+
+<script>
+"use strict";
+const INST_COLOR = { s1k: "--s1", s4k: "--s2" };
+const state = { range: localGet("range") || "7d", inst: null, variant: null, overview: null, tables: null, charts: {} };
+
+function localGet(k) { try { return localStorage.getItem("ttb." + k); } catch (e) { return null; } }
+function localSet(k, v) { try { localStorage.setItem("ttb." + k, v); } catch (e) { /* ignore */ } }
+function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function instColor(inst) { return css(INST_COLOR[inst] || "--ink-2"); }
+function alpha(hex, a) {
+  const h = hex.replace("#", "");
+  const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") e.className = v; else if (k === "style") e.style.cssText = v; else e.setAttribute(k, v);
+  }
+  for (const c of kids) if (c != null) e.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  return e;
+}
+const fmt = {
+  pct(x, d = 2) { return x == null || isNaN(x) ? "–" : (x >= 0 ? "+" : "−") + Math.abs(x * 100).toFixed(d) + "%"; },
+  usd(x, d = 2) { return x == null ? "–" : "$" + Number(x).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }); },
+  num(x, d = 0) { return x == null ? "–" : Number(x).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }); },
+  w(x) { return x == null ? "–" : Number(x).toFixed(3); },
+  bps(x) { return x == null ? "–" : Number(x).toFixed(1) + " bps"; },
+  price(x) { if (x == null) return "–"; const v = Number(x); return v >= 1 ? v.toFixed(4) : v.toPrecision(5); },
+  ts(s) { return s ? s.replace("T", " ").replace(/(\.\d+)?Z$/, "") : "–"; },
+  age(sec) {
+    if (sec == null) return "–";
+    if (sec < 120) return Math.round(sec) + " s";
+    if (sec < 7200) return Math.round(sec / 60) + " min";
+    if (sec < 172800) return (sec / 3600).toFixed(1) + " h";
+    return (sec / 86400).toFixed(1) + " d";
+  },
+};
+function signClass(x) { return x == null ? "" : x >= 0 ? "pos" : "neg"; }
+function setPill(id, status, text) {
+  const p = document.getElementById(id);
+  p.className = "pill st-" + status;
+  p.querySelector(".t").textContent = text;
+}
+
+// ---- UTC time axis (no date adapter needed) ----------------------------------------------------
+const STEPS = [60e3, 300e3, 900e3, 1800e3, 3600e3, 3 * 3600e3, 6 * 3600e3, 12 * 3600e3, 864e5, 2 * 864e5,
+  7 * 864e5, 14 * 864e5, 30 * 864e5, 91 * 864e5, 182 * 864e5, 365 * 864e5];
+function utcTicks(scale) {
+  const span = scale.max - scale.min;
+  const step = STEPS.find(s => span / s <= 8) || STEPS[STEPS.length - 1];
+  const ticks = [];
+  for (let t = Math.ceil(scale.min / step) * step; t <= scale.max; t += step) ticks.push({ value: t });
+  scale.ticks = ticks;
+  scale._utcStep = step;
+}
+function utcLabel(v, step) {
+  const d = new Date(v).toISOString();
+  if (step >= 864e5) return d.slice(0, 10);
+  return d.slice(5, 10) + " " + d.slice(11, 16);
+}
+function timeAxis(min, max) {
+  return {
+    type: "linear", bounds: "data", min: min ?? undefined, max: max ?? undefined,
+    afterBuildTicks: utcTicks,
+    ticks: { color: css("--muted"), maxRotation: 0, autoSkip: false, callback(v) { return utcLabel(v, this._utcStep || 36e5); } },
+    grid: { color: css("--grid"), lineWidth: 1, drawTicks: false },
+    border: { color: css("--axis") },
+  };
+}
+
+// one tooltip for every series: nearest point of each dataset along x
+Chart.Interaction.modes.xnearest = function (chart, e) {
+  const items = [];
+  chart.data.datasets.forEach((ds, di) => {
+    const meta = chart.getDatasetMeta(di);
+    if (!chart.isDatasetVisible(di) || ds.tooltip === false) return;
+    const els = meta.data;
+    if (!els.length) return;
+    let lo = 0, hi = els.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (els[mid].x < e.x) lo = mid + 1; else hi = mid; }
+    let best = lo;
+    if (lo > 0 && Math.abs(els[lo - 1].x - e.x) < Math.abs(els[lo].x - e.x)) best = lo - 1;
+    const dx = Math.abs(els[best].x - e.x);
+    if (ds.type === "scatter" || meta.type === "scatter") { if (dx > 12) return; }
+    else if (dx > 40) return;
+    items.push({ element: els[best], datasetIndex: di, index: best });
+  });
+  return items;
+};
+const crosshair = {
+  id: "crosshair",
+  afterEvent(chart, args) { chart._cx = args.event.type === "mouseout" ? null : args.event.x; },
+  afterDraw(chart) {
+    if (chart._cx == null || !chart.tooltip || !chart.tooltip.getActiveElements().length) return;
+    const { top, bottom, left, right } = chart.chartArea;
+    if (chart._cx < left || chart._cx > right) return;
+    const ctx = chart.ctx;
+    ctx.save(); ctx.strokeStyle = css("--axis"); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(chart._cx + 0.5, top); ctx.lineTo(chart._cx + 0.5, bottom); ctx.stroke(); ctx.restore();
+  },
+};
+Chart.register(crosshair);
+
+function baseOptions(yOpts, tooltipLabel, xRange) {
+  return {
+    animation: false, responsive: true, maintainAspectRatio: false, parsing: false, normalized: true,
+    interaction: { mode: "xnearest", intersect: false },
+    layout: { padding: { top: 4, right: 8 } },
+    scales: {
+      x: timeAxis(...(xRange || [])),
+      y: Object.assign({
+        ticks: { color: css("--muted") },
+        grid: { color: css("--grid"), lineWidth: 1, drawTicks: false },
+        border: { color: css("--axis") },
+      }, yOpts || {}),
+    },
+    plugins: {
+      legend: { position: "top", align: "start", labels: { color: css("--ink-2"), usePointStyle: true, boxHeight: 6, boxWidth: 18,
+        filter: item => !item.text.startsWith("_") } },
+      tooltip: {
+        backgroundColor: css("--surface"), titleColor: css("--muted"), bodyColor: css("--ink"),
+        borderColor: css("--border"), borderWidth: 1, padding: 10, boxWidth: 12, boxHeight: 2, usePointStyle: false,
+        filter: it => !it.dataset.label.startsWith("_"),
+        callbacks: {
+          title: items => items.length ? new Date(items[0].parsed.x).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "",
+          label: tooltipLabel,
+        },
+      },
+    },
+  };
+}
+function lineDs(label, data, color, extra) {
+  return Object.assign({ type: "line", label, data, borderColor: color, backgroundColor: color, borderWidth: 2,
+    pointRadius: 0, pointHoverRadius: 4, borderJoinStyle: "round", borderCapStyle: "round", spanGaps: true, tension: 0 }, extra || {});
+}
+function upsertChart(key, canvasId, config) {
+  const old = state.charts[key];
+  if (old && old.config.type === config.type) {
+    old.data = config.data; old.options = config.options; old.update("none"); return old;
+  }
+  if (old) old.destroy();
+  state.charts[key] = new Chart(document.getElementById(canvasId), config);
+  return state.charts[key];
+}
+function renderTable(containerId, columns, rows, rowClass) {
+  const box = document.getElementById(containerId);
+  box.replaceChildren();
+  if (!rows.length) { box.append(el("div", { class: "empty" }, "No data yet")); return; }
+  const thead = el("thead", {}, el("tr", {}, ...columns.map(c => el("th", { class: c.num ? "num" : "" }, c.label))));
+  const tbody = el("tbody");
+  for (const r of rows) {
+    const tr = el("tr", { class: rowClass ? rowClass(r) : "" });
+    for (const c of columns) {
+      const v = c.get(r);
+      const td = el("td", { class: (c.num ? "num " : "") + (c.cls ? c.cls(r) : "") }, v == null ? "–" : v);
+      tr.append(td);
+    }
+    tbody.append(tr);
+  }
+  box.append(el("table", {}, thead, tbody));
+}
+
+// ---- data ---------------------------------------------------------------------------------------
+async function getJSON(url) {
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error(url + " " + r.status);
+  return r.json();
+}
+
+function renderHeader(ov) {
+  const age = ov.data_age_sec;
+  if (ov.replay) setPill("fresh", "warning", "replay data · last bar " + fmt.ts(ov.last_bar_ts));
+  else setPill("fresh", age != null && age <= 180 ? "good" : "critical",
+    "last bar " + (age == null ? "–" : fmt.age(age) + " ago"));
+  const ws = ov.ws_connected;
+  const rtAge = ov.runtime_age_sec;
+  if (ov.replay) setPill("ws", "neutral", "WebSocket: n/a (replay)");
+  else if (rtAge != null && rtAge > 120) setPill("ws", "critical", "bot not running? (status " + fmt.age(rtAge) + " old)");
+  else setPill("ws", ws ? "good" : "critical", ws ? "WebSocket connected" : "WebSocket down");
+  setPill("kill", ov.kill_switch ? "critical" : "good", ov.kill_switch ? "KILL SWITCH ACTIVE" : "kill switch off");
+  document.getElementById("replay").classList.toggle("hidden", !ov.replay);
+  document.getElementById("testnet").classList.toggle("hidden", !ov.testnet);
+  document.getElementById("footer").textContent =
+    "Reads only the JSON files in " + ov.data_dir + " · refreshes every 30 s · errors (24h): " + (ov.errors_24h ?? "–");
+}
+
+function stat(label, value, cls) {
+  return el("div", { class: "stat" }, el("dt", {}, label), el("dd", { class: cls || "" }, value));
+}
+
+function renderCards(ov) {
+  const box = document.getElementById("cards");
+  box.replaceChildren();
+  const insts = Object.keys(ov.instances);
+  if (!insts.length) { box.append(el("div", { class: "card empty" }, "No instance summaries yet in DATA_DIR")); return; }
+  for (const name of insts) {
+    const s = ov.instances[name];
+    const prim = s.primary_variant || "touch";
+    const port = (s.portfolios || {})[prim] || {};
+    const ex = (s.excess_by_variant || {})[prim];
+    const cur = s.current || {};
+    const head = el("div", { class: "card-head" },
+      el("h3", {}, el("span", { class: "swatch", style: "background:" + instColor(name) }), name),
+      el("span", { class: "sub" }, "capital " + fmt.usd(s.capital_usd, 0)),
+      el("span", { class: "badge " + (s.mode === "live" ? "live" : "paper") }, s.mode === "live" ? "LIVE" : "PAPER"));
+    if (s.live_suspended) head.append(el("span", { class: "badge killed" }, "HALTED"));
+    const variants = Object.entries(s.excess_by_variant || {}).map(([v, x]) => v + " " + fmt.pct(x)).join(" · ");
+    const hodl = port.hodl || {};
+    const tok = (sym, eq) => {
+      const h = hodl[sym];
+      return el("div", {}, `${sym} ${fmt.num(port[eq], sym === "TFUEL" ? 0 : 1)} vs ${fmt.num(h, sym === "TFUEL" ? 0 : 1)} `,
+        el("span", { class: signClass(ex) }, "(" + fmt.pct(ex, 1) + ")"));
+    };
+    const wCur = cur.w_current, wTgt = cur.w_target;
+    const bar = el("div", { class: "wbar", title: "THETA weight: current vs target" },
+      el("div", { class: "fill", style: `width:${Math.max(0, Math.min(1, wCur || 0)) * 100}%;background:${instColor(name)}` }),
+      el("div", { class: "tgt", style: `left:calc(${Math.max(0, Math.min(1, wTgt || 0)) * 100}% - 1px)` }));
+    const posTxt = cur.pos == null ? "–" : cur.pos > 0 ? "+1 (THETA cheap)" : cur.pos < 0 ? "−1 (THETA rich)" : "0 (flat)";
+    const card = el("article", { class: "card" }, head,
+      el("div", { class: "hero" }, el("div", { class: "hero-num " + signClass(ex) }, fmt.pct(ex)),
+        el("div", { class: "hero-label" }, "excess vs HODL (" + prim + ")")),
+      el("p", { class: "sub" }, "range: " + (variants || "–")),
+      el("div", { class: "tokens" }, tok("THETA", "theta_equiv_tokens"), tok("TFUEL", "tfuel_equiv_tokens")),
+      bar,
+      el("div", { class: "wlegend" }, el("span", {}, "THETA weight " + fmt.w(wCur)), el("span", {}, "target " + fmt.w(wTgt))),
+      el("dl", { class: "stats" },
+        stat("Value", fmt.usd(port.value_usd)),
+        stat("HODL value", fmt.usd(port.hodl_value_usd)),
+        stat("Overlay pos", posTxt),
+        stat("Ladder weight", fmt.w(cur.ladder_w)),
+        stat("Deviation (3d EMA)", cur.dev == null ? "–" : (cur.dev * 100).toFixed(2) + "%"),
+        stat("Ratio", cur.ratio == null ? "–" : Number(cur.ratio).toFixed(3)),
+        stat("Trades total / 30d", `${s.trades_total ?? 0} / ${s.trades_30d ?? 0}`),
+        stat("Fees paid", fmt.usd(s.fees_usd)),
+        stat("Avg slippage", fmt.bps(s.avg_slippage_bps)),
+        stat("Benchmark since", fmt.ts(s.benchmark_start).slice(0, 10)),
+        stat("Last bar", fmt.ts(s.last_bar_ts).slice(5)),
+        stat("Excess YTD", fmt.pct((s.excess_ytd || {})[prim]), signClass((s.excess_ytd || {})[prim]))));
+    const ref = s.reference;
+    if (ref) {
+      const range = `${fmt.pct(ref.lo, 1)} .. ${fmt.pct(ref.hi, 1)}`;
+      const scope = ref.label + (ref.days < 300 ? `, prorated to ${ref.days.toFixed(0)} days` : "");
+      card.append(el("div", { class: "ref st-" + ref.status }, el("span", { class: "dot" }),
+        el("div", {}, el("div", {}, `Backtest reference ${range} (${scope})`),
+          el("div", { class: "sub" }, `${ref.year} result ${fmt.pct(ref.value)} — ${ref.text}`))));
+    }
+    if (s.live && s.live.risk && s.live.risk.blocked) {
+      card.append(el("div", { class: "ref st-critical" }, el("span", { class: "dot" }),
+        el("div", {}, "Live orders blocked today: " + s.live.risk.block_reason)));
+    }
+    box.append(card);
+  }
+}
+
+function renderRatio(d) {
+  const sub = document.getElementById("rangeInfo");
+  sub.textContent = d.points.length ? `${fmt.ts(new Date(d.start).toISOString())} – ${fmt.ts(new Date(d.end).toISOString())} UTC · ${d.stride_min}-min points` : "";
+  const ink = css("--ink"), ink2 = css("--ink-2"), aqua = css("--s3");
+  const P = d.points;
+  const xy = k => P.filter(p => p[k] != null).map(p => ({ x: p.t, y: p[k] }));
+  const ds = [
+    lineDs("_entry_lo", xy("lo"), alpha(aqua, 0.6), { borderWidth: 1, tooltip: false }),
+    lineDs(`3-day EMA ±${(d.entry * 100).toFixed(0)}% band`, xy("up"), alpha(aqua, 0.6), { borderWidth: 1, fill: "-1", backgroundColor: alpha(aqua, 0.10) }),
+    lineDs("3-day EMA", xy("ema"), aqua),
+  ];
+  const L = d.ladder || [];
+  if (L.length) {
+    const outer = L[0].bands.length - 1;
+    ds.push(lineDs("_lad_lo2", L.map(p => ({ x: p.t, y: p.bands[outer][0] })), alpha(ink2, 0.35), { borderWidth: 1, stepped: "after", tooltip: false }));
+    ds.push(lineDs(`ladder ±${(d.tiers[outer][0] * 100).toFixed(0)}%`, L.map(p => ({ x: p.t, y: p.bands[outer][1] })), alpha(ink2, 0.35), { borderWidth: 1, stepped: "after", fill: "-1", backgroundColor: alpha(ink2, 0.05) }));
+    ds.push(lineDs("_lad_lo1", L.map(p => ({ x: p.t, y: p.bands[0][0] })), alpha(ink2, 0.5), { borderWidth: 1, stepped: "after", tooltip: false }));
+    ds.push(lineDs(`ladder ±${(d.tiers[0][0] * 100).toFixed(0)}%`, L.map(p => ({ x: p.t, y: p.bands[0][1] })), alpha(ink2, 0.5), { borderWidth: 1, stepped: "after", fill: "-1", backgroundColor: alpha(ink2, 0.07) }));
+    ds.push(lineDs("60-day EMA", L.map(p => ({ x: p.t, y: p.ema })), ink2, { stepped: "after" }));
+  }
+  ds.push(lineDs("R = THETA/TFUEL", xy("r"), ink, { borderWidth: 1.25 }));
+  for (const [inst, ms] of Object.entries(d.markers || {})) {
+    const c = instColor(inst);
+    ds.push({
+      type: "scatter", label: inst + " rebalances", data: ms.map(m => ({ x: m.t, y: m.r, m })),
+      pointStyle: "triangle", rotation: ms.map(m => (m.w_target > m.w_from ? 0 : 180)),
+      pointRadius: 8, pointHoverRadius: 10, pointHitRadius: 12, backgroundColor: c, borderColor: css("--surface"), borderWidth: 2,
+    });
+  }
+  const opts = baseOptions({ ticks: { color: css("--muted"), callback: v => Number(v).toFixed(2) } }, ctx => {
+    const raw = ctx.raw;
+    if (raw && raw.m) {
+      const m = raw.m;
+      return ` ${ctx.dataset.label}: ${m.reason} · w ${fmt.w(m.w_from)} → ${fmt.w(m.w_target)} · ${fmt.usd(m.dv, 0)}`;
+    }
+    return ` ${Number(ctx.parsed.y).toFixed(4)}  ${ctx.dataset.label}`;
+  }, [d.start, d.end]);
+  upsertChart("ratio", "ratioChart", { type: "line", data: { datasets: ds }, options: opts });
+  const rows = P.slice(-200).reverse();
+  renderTable("ratioTable", [
+    { label: "time (UTC)", get: r => fmt.ts(new Date(r.t).toISOString()) },
+    { label: "R", num: 1, get: r => Number(r.r).toFixed(4) },
+    { label: "3-day EMA", num: 1, get: r => r.ema == null ? null : Number(r.ema).toFixed(4) },
+    { label: "upper band", num: 1, get: r => r.up == null ? null : Number(r.up).toFixed(4) },
+    { label: "lower band", num: 1, get: r => r.lo == null ? null : Number(r.lo).toFixed(4) },
+    { label: "stale", get: r => r.stale ? "yes" : "" },
+  ], rows);
+}
+
+function renderExcess(d) {
+  const ds = [];
+  const table = {};
+  for (const [inst, byVar] of Object.entries(d.series || {})) {
+    const c = instColor(inst);
+    const prim = (d.primary || {})[inst] || "touch";
+    const order = Object.keys(byVar).sort((a, b) => (a === prim) - (b === prim));
+    for (const v of order) {
+      const isPrim = v === prim;
+      const pts = byVar[v].map(([t, x]) => ({ x: t, y: x * 100 }));
+      ds.push(lineDs(`${inst} ${v}${isPrim ? " (primary)" : ""}`, pts, isPrim ? c : alpha(c, 0.5),
+        { borderWidth: isPrim ? 2.5 : 1, borderDash: v === "worst" ? [4, 3] : [], order: isPrim ? 0 : 1 }));
+      for (const [t, x] of byVar[v]) { (table[t] = table[t] || {})[`${inst} ${v}`] = x; }
+    }
+  }
+  const opts = baseOptions({ ticks: { color: css("--muted"), callback: v => v.toFixed(1) + "%" } },
+    ctx => ` ${(ctx.parsed.y >= 0 ? "+" : "") + ctx.parsed.y.toFixed(2)}%  ${ctx.dataset.label}`, [d.start, d.end]);
+  upsertChart("excess", "excessChart", { type: "line", data: { datasets: ds }, options: opts });
+  const cols = [...new Set(Object.values(table).flatMap(Object.keys))].sort();
+  const rows = Object.keys(table).map(Number).sort((a, b) => b - a).slice(0, 200).map(t => ({ t, ...table[t] }));
+  renderTable("excessTable", [{ label: "time (UTC)", get: r => fmt.ts(new Date(r.t).toISOString()) },
+    ...cols.map(c => ({ label: c, num: 1, get: r => r[c] == null ? null : fmt.pct(r[c]) }))], rows);
+}
+
+function renderWeights(d) {
+  const ds = [];
+  const rows = [];
+  for (const [inst, s] of Object.entries(d.series || {})) {
+    const c = instColor(inst);
+    ds.push(lineDs(`${inst} w (${s.variant})`, s.w.map(([t, y]) => ({ x: t, y })), c));
+    ds.push(lineDs(`${inst} w_target`, s.w_target.map(([t, y]) => ({ x: t, y })), c, { borderWidth: 1.5, borderDash: [6, 4], stepped: "after" }));
+    const tgt = Object.fromEntries(s.w_target);
+    for (const [t, y] of s.w.slice(-100)) rows.push({ t, inst, w: y, wt: tgt[t] });
+  }
+  const opts = baseOptions({ min: 0, max: 1, ticks: { color: css("--muted"), stepSize: 0.1 } },
+    ctx => ` ${Number(ctx.parsed.y).toFixed(3)}  ${ctx.dataset.label}`, [d.start, d.end]);
+  upsertChart("weights", "weightChart", { type: "line", data: { datasets: ds }, options: opts });
+  rows.sort((a, b) => b.t - a.t);
+  renderTable("weightTable", [
+    { label: "time (UTC)", get: r => fmt.ts(new Date(r.t).toISOString()) },
+    { label: "instance", get: r => r.inst },
+    { label: "w", num: 1, get: r => fmt.w(r.w) },
+    { label: "w_target", num: 1, get: r => fmt.w(r.wt) },
+  ], rows.slice(0, 200));
+}
+
+function renderCompare(d) {
+  const insts = Object.entries(d.instances || {});
+  document.getElementById("comparePanel").classList.toggle("hidden", !insts.length);
+  if (!insts.length) return;
+  const ds = [], bars = [], stats = [];
+  for (const [inst, s] of insts) {
+    const c = instColor(inst);
+    ds.push(lineDs(`${inst} live`, s.live.map(([t, x]) => ({ x: t, y: x * 100 })), c));
+    ds.push(lineDs(`${inst} paper (touch)`, s.touch.map(([t, x]) => ({ x: t, y: x * 100 })), alpha(c, 0.55), { borderWidth: 1.5, borderDash: [6, 4] }));
+    bars.push({ label: `${inst} fills`, data: s.slippage.hist.map(([b, n]) => ({ x: b + 2.5, y: n })), backgroundColor: c,
+      borderRadius: 4, borderSkipped: "start", maxBarThickness: 24, barPercentage: 0.9, categoryPercentage: 0.9 });
+    stats.push(`${inst}: live ${fmt.pct(s.excess_live)} vs paper ${fmt.pct(s.excess_touch)} · ${s.slippage.n} live fills, mean slippage ${fmt.bps(s.slippage.mean)}`);
+  }
+  const opts = baseOptions({ ticks: { color: css("--muted"), callback: v => v.toFixed(1) + "%" } },
+    ctx => ` ${ctx.parsed.y.toFixed(2)}%  ${ctx.dataset.label}`);
+  upsertChart("compare", "compareChart", { type: "line", data: { datasets: ds }, options: opts });
+  upsertChart("slip", "slipChart", {
+    type: "bar", data: { datasets: bars },
+    options: {
+      animation: false, responsive: true, maintainAspectRatio: false, parsing: false,
+      scales: {
+        x: { type: "linear", title: { display: true, text: "slippage vs mid (bps, 5-bps bins)", color: css("--muted") },
+          ticks: { color: css("--muted") }, grid: { display: false }, border: { color: css("--axis") } },
+        y: { beginAtZero: true, ticks: { color: css("--muted"), precision: 0 }, grid: { color: css("--grid") }, border: { display: false } },
+      },
+      plugins: { legend: { labels: { color: css("--ink-2") } },
+        tooltip: { callbacks: { title: it => `${it[0].parsed.x - 2.5} .. ${it[0].parsed.x + 2.5} bps`, label: c => ` ${c.parsed.y} fills  ${c.dataset.label}` } } },
+    },
+  });
+  document.getElementById("compareStats").textContent = stats.join("  ·  ");
+}
+
+function renderTables() {
+  const t = state.tables;
+  if (!t) return;
+  const insts = Object.keys(t.instances);
+  if (!state.inst || !insts.includes(state.inst)) state.inst = insts[0] || null;
+  const tabs = document.getElementById("instTabs");
+  tabs.replaceChildren(...insts.map(n => {
+    const b = el("button", { class: "seg", "aria-pressed": String(n === state.inst) }, n);
+    b.onclick = () => { state.inst = n; state.variant = null; renderTables(); };
+    return b;
+  }));
+  const data = state.inst ? t.instances[state.inst] : null;
+  if (!data) { renderTable("decisionsTable", [], []); renderTable("ordersTable", [], []); }
+  else {
+    renderTable("decisionsTable", [
+      { label: "time (UTC)", get: r => fmt.ts(r.ts) },
+      { label: "decision", get: r => r.decision_id },
+      { label: "reason", get: r => r.reason },
+      { label: "w from", num: 1, get: r => fmt.w(r.w_from) },
+      { label: "w target", num: 1, get: r => fmt.w(r.w_target) },
+      { label: "dv", num: 1, get: r => fmt.usd(r.dv_usd) },
+      { label: "ratio", num: 1, get: r => r.ratio == null ? null : Number(r.ratio).toFixed(3) },
+      { label: "mode", get: r => r.mode },
+    ], data.decisions.slice(0, 50));
+    const variants = [...new Set(data.orders.map(o => o.variant))];
+    const sel = document.getElementById("variantSel");
+    if (!state.variant || !variants.includes(state.variant)) state.variant = variants.includes(data.primary_variant) ? data.primary_variant : variants[0];
+    sel.replaceChildren(...variants.map(v => { const o = el("option", { value: v }, v); if (v === state.variant) o.selected = true; return o; }));
+    sel.onchange = () => { state.variant = sel.value; renderTables(); };
+    const orders = data.orders.filter(o => o.variant === state.variant && o.event !== "submitted").slice(0, 50);
+    renderTable("ordersTable", [
+      { label: "time (UTC)", get: r => fmt.ts(r.ts) },
+      { label: "client order id", get: r => r.client_order_id },
+      { label: "symbol", get: r => r.symbol },
+      { label: "side", get: r => r.side },
+      { label: "status", get: r => r.status },
+      { label: "qty", num: 1, get: r => fmt.num(r.filled_qty ?? r.qty, 2) },
+      { label: "avg price", num: 1, get: r => fmt.price(r.avg_price) },
+      { label: "quote", num: 1, get: r => fmt.usd(r.quote_qty) },
+      { label: "fee", num: 1, get: r => r.commission == null ? null : `${Number(r.commission).toPrecision(4)} ${r.commission_asset || ""}` },
+      { label: "slippage", num: 1, get: r => fmt.bps(r.slippage_bps_vs_mid) },
+      { label: "mid at decision", num: 1, get: r => fmt.price(r.mid_at_decision) },
+    ], orders);
+  }
+  renderTable("eventsTable", [
+    { label: "time (UTC)", get: r => fmt.ts(r.ts) },
+    { label: "level", get: r => r.level },
+    { label: "instance", get: r => r.instance || "" },
+    { label: "kind", get: r => r.kind },
+    { label: "message", get: r => r.message, cls: () => "msg" },
+  ], t.events, r => "lv-" + r.level);
+}
+
+function renderReference(ov) {
+  const ref = ov.reference || {};
+  document.getElementById("refNote").textContent = ref.note || "";
+  const table = ref.table || {};
+  const years = [...new Set(Object.values(table).flatMap(o => Object.keys(o)))].sort();
+  const rows = Object.entries(table).map(([inst, by]) => ({ inst, by }));
+  renderTable("refTable", [{ label: "instance", get: r => r.inst },
+    ...years.map(y => ({ label: y === "2026" ? "2026 YTD" : y, num: 1,
+      get: r => r.by[y] ? `${fmt.pct(r.by[y][0], 0)} .. ${fmt.pct(r.by[y][1], 0)}` : null }))], rows);
+}
+
+let busy = false;
+async function refresh() {
+  if (busy) return;
+  busy = true;
+  const main = document.getElementById("main");
+  main.classList.add("loading");
+  try {
+    const r = state.range;
+    const [ov, ratio, excess, weights, tables, compare] = await Promise.all([
+      getJSON("/api/overview"), getJSON("/api/ratio?range=" + r), getJSON("/api/excess?range=" + r),
+      getJSON("/api/weights?range=" + r), getJSON("/api/tables?n=50"), getJSON("/api/compare"),
+    ]);
+    state.overview = ov; state.tables = tables;
+    renderHeader(ov); renderCards(ov); renderRatio(ratio); renderExcess(excess); renderWeights(weights);
+    renderCompare(compare); renderTables(); renderReference(ov);
+  } catch (e) {
+    console.error(e);
+    setPill("fresh", "critical", "dashboard API error");
+  } finally {
+    main.classList.remove("loading");
+    busy = false;
+  }
+}
+
+function setRange(r) {
+  state.range = r; localSet("range", r);
+  document.querySelectorAll("button[data-range]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.range === r)));
+  refresh();
+}
+document.querySelectorAll("button[data-range]").forEach(b => b.addEventListener("click", () => setRange(b.dataset.range)));
+setInterval(() => { document.getElementById("clock").textContent = "UTC " + new Date().toISOString().slice(0, 19).replace("T", " "); }, 1000);
+setInterval(refresh, 30000);
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  for (const c of Object.values(state.charts)) c.destroy();
+  state.charts = {};
+  refresh();
+});
+setRange(state.range);
+</script>
+</body>
+</html>

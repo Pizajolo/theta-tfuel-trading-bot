@@ -53,6 +53,10 @@ def client_order_id(instance: str, decision_id: str, leg: int, slice_no: int) ->
     return cid
 
 
+class UnresolvedOrder(Exception):
+    """An order's fate could not be determined; it stays in flight until it is resolved."""
+
+
 @dataclass
 class OrderOutcome:
     client_order_id: str
@@ -327,6 +331,8 @@ class LiveExecutor:
         except asyncio.CancelledError:
             outcome = "pending_retry"
             raise
+        except UnresolvedOrder:
+            outcome = "pending_retry"
         except Exception as exc:
             d["last_error"] = repr(exc)
             self._event("ERROR", "execution_error", f"decision {d['id']} attempt {d['attempts']} failed: {exc!r}")
@@ -360,6 +366,8 @@ class LiveExecutor:
         p = self.params
         t0 = time.monotonic()
         w_target = float(d["w_target"])
+        if self.inflight and not await self.resolve_inflight():
+            return "pending_retry"
         total, free = await self.refresh_balances()
         px = await self.mids()
 
@@ -535,6 +543,11 @@ class LiveExecutor:
         except UnknownOrderStatus as exc:
             self._event("WARNING", "order_status_unknown", f"{cid}: {exc}; querying by client order id")
             out = await self.resolve(sym, cid, side, leg)
+            if out.status == "UNKNOWN":
+                # Keep the order in flight: it is resolved before anything else is sent.
+                self._event("ERROR", "order_unresolved", f"{cid}: {out.error}; trading paused for this decision until resolved")
+                self.save_fn()
+                raise UnresolvedOrder(cid)
         except BinanceAPIError as exc:
             out = OrderOutcome(cid, sym, side, leg, "REJECTED", qty=float(qty), price=float(limit), error=f"{exc.code}: {exc.msg}")
         out.client_order_id = out.client_order_id or cid
@@ -601,30 +614,38 @@ class LiveExecutor:
             self._event("WARNING", "order_" + out.status.lower(), f"{out.client_order_id} {out.side} {out.symbol}: {out.error}")
 
     # ---- restart -------------------------------------------------------------------------------
-    async def reconcile(self) -> None:
-        """Resolve an order that was in flight at shutdown and cancel stray open orders."""
-        if self.inflight:
-            inf = self.inflight
-            out = await self.resolve(inf["symbol"], inf["client_order_id"], inf["side"], int(inf["leg"]))
-            d = self.decision if self.decision and self.decision.get("id") == inf.get("decision_id") else {
-                "id": inf.get("decision_id"), "mid": {"THETA": 0.0, "TFUEL": 0.0}}
-            base = dict(
-                decision_id=inf.get("decision_id"), client_order_id=inf["client_order_id"], symbol=inf["symbol"],
-                side=inf["side"], type="LIMIT", tif="IOC", price=inf.get("price"), qty=inf.get("qty"), leg=inf["leg"],
-                mode="live", variant="live", mid_at_decision=(d.get("mid") or {}).get(ASSET_OF[inf["symbol"]], 0.0),
-                reconciled=True,
-            )
-            if out.status != "UNKNOWN":
-                self._record(d, out, base)
-                if out.filled:
-                    if int(inf["leg"]) == 1:
-                        self.pending_usdt += out.quote_qty - out.usdt_commission()
-                    else:
-                        self.pending_usdt = max(0.0, self.pending_usdt - out.quote_qty - out.usdt_commission())
-                self._event("INFO", "order_reconciled", f"{inf['client_order_id']}: {out.status}, filled {out.executed_qty}")
-                self.inflight = None
+    async def resolve_inflight(self) -> bool:
+        """Resolve the order that was in flight (crash or lost response). True when resolved."""
+        inf = self.inflight
+        if not inf:
+            return True
+        out = await self.resolve(inf["symbol"], inf["client_order_id"], inf["side"], int(inf["leg"]))
+        if out.status == "UNKNOWN":
+            self._event("ERROR", "order_unresolved", f"{inf['client_order_id']}: still unresolved ({out.error})")
+            return False
+        d = self.decision if self.decision and self.decision.get("id") == inf.get("decision_id") else {
+            "id": inf.get("decision_id"), "mid": {"THETA": 0.0, "TFUEL": 0.0}}
+        base = dict(
+            decision_id=inf.get("decision_id"), client_order_id=inf["client_order_id"], symbol=inf["symbol"],
+            side=inf["side"], type="LIMIT", tif="IOC", price=inf.get("price"), qty=inf.get("qty"), leg=inf["leg"],
+            mode="live", variant="live", mid_at_decision=(d.get("mid") or {}).get(ASSET_OF[inf["symbol"]], 0.0),
+            reconciled=True,
+        )
+        self._record(d, out, base)
+        if out.filled:
+            if int(inf["leg"]) == 1:
+                self.pending_usdt += out.quote_qty - out.usdt_commission()
             else:
-                self._event("ERROR", "order_unresolved", f"{inf['client_order_id']}: could not be resolved; will retry on next start")
+                self.pending_usdt = max(0.0, self.pending_usdt - out.quote_qty - out.usdt_commission())
+        self._event("INFO", "order_reconciled", f"{inf['client_order_id']}: {out.status}, filled {out.executed_qty}")
+        self.inflight = None
+        self.save_fn()
+        return True
+
+    async def reconcile(self) -> None:
+        """On start: resolve an order that was in flight at shutdown and cancel stray open orders."""
+        if self.inflight:
+            await self.resolve_inflight()
         prefix = f"{self.instance}-"
         for sym in SYMBOLS:
             try:
