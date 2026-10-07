@@ -15,7 +15,7 @@ import threading
 from pathlib import Path
 from typing import Any, Callable
 
-from bot.storage import iter_jsonl, read_json, tail_jsonl
+from bot.storage import read_json, tail_jsonl
 from bot.util import DAY_MS, MINUTE_MS, iso_to_ms, ms_to_date
 
 NICE_STRIDES = (1, 2, 5, 10, 15, 30, 60, 120, 240, 360, 720, 1440)

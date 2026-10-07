@@ -15,7 +15,6 @@ from __future__ import annotations
 import csv
 import itertools
 import logging
-import math
 import time
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -24,12 +23,12 @@ from typing import Any, Iterable, Iterator
 
 from bot.config import Settings
 from bot.instance import Instance
-from bot.market_data import JointBar, Kline
+from bot.market_data import JointBar, Kline, bar_fields
 from bot.portfolio import Portfolio, prices, value_of
 from bot.reference import reference_range
 from bot.signals import MarketEma
 from bot.storage import Storage, atomic_write_json
-from bot.util import MINUTE_MS, SimClock, iso_to_ms, ms_to_iso, year_of, year_start_ms
+from bot.util import SimClock, iso_to_ms, ms_to_iso, year_of, year_start_ms
 
 log = logging.getLogger("bot.replay")
 
@@ -256,11 +255,7 @@ def run_replay(
         clock.set(bar.close_ms)
         px = prices(bar.theta.c, bar.tfuel.c)
         ema, dev = market_ema.update(bar.ts_ms, bar.lr)
-        storage.write_bar(
-            bar.ts_ms,
-            theta=_kl(bar.theta), tfuel=_kl(bar.tfuel), ratio=bar.ratio, lr=bar.lr,
-            ema3d=ema, ema3d_ratio=math.exp(ema), dev=dev, stale=bar.stale,
-        )
+        storage.write_bar(bar.ts_ms, **bar_fields(bar, ema, dev))
         phase = "warmup" if start_ms is not None and bar.ts_ms < start_ms else "live"
         for inst in instances:
             was_started = inst.started
@@ -270,13 +265,13 @@ def run_replay(
             if not was_started:
                 for v, p in inst.paper.items():
                     years.start(inst.name, v, p, px, bar.close_ms)
-                next_year_ms[inst.name] = year_start_ms(year_of(bar.close_ms) + 1)
-            elif bar.close_ms >= next_year_ms[inst.name]:
+                next_year_ms[inst.name] = year_start_ms(year_of(bar.ts_ms) + 1)
+            elif bar.ts_ms >= next_year_ms[inst.name]:  # first bar of a new UTC year
                 # Year boundary: close with the previous bar's prices, open the new year.
                 for v, p in inst.paper.items():
                     years.close(inst.name, v, p, last_px, last_bar.close_ms)
                     years.start(inst.name, v, p, last_px, last_bar.close_ms)
-                next_year_ms[inst.name] = year_start_ms(year_of(bar.close_ms) + 1)
+                next_year_ms[inst.name] = year_start_ms(year_of(bar.ts_ms) + 1)
         last_bar, last_px = bar, px
         n_bars += 1
         if progress and n_bars % 100_000 == 0:
@@ -336,9 +331,6 @@ def run_replay(
     atomic_write_json(out / "replay_report.json", report, indent=2)
     return report
 
-
-def _kl(k: Kline) -> dict[str, float | None]:
-    return {"o": k.o, "h": k.h, "l": k.l, "c": k.c, "v": k.v, "bid": None, "ask": None}
 
 
 def format_report(report: dict[str, Any]) -> str:

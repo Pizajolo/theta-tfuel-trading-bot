@@ -185,6 +185,10 @@ so the dashboard can display it. Notes:
 Large deviations from the reference ranges should be investigated (warm-up, impact model, the
 per-year convention), not tuned away.
 
+Resources: one year of 1m data (525,600 rows, both instances) takes about 3 minutes from `.xlsx`
+(most of it is reading the workbook), about 100 MB of RAM and about 700 MB of output in the replay
+directory - budget roughly 2-3 GB for the full 2023-2026 replay.
+
 ---
 
 ## Binance sub-accounts and API keys
@@ -267,9 +271,23 @@ exchange) cycle above worked:
    name, rebalances with the normal execution engine and re-snapshots the benchmark.
 5. Watch the dashboard (LIVE badge, live vs paper section) and `events.jsonl`.
 
-Hard limits per instance: `MAX_ORDER_USD` (1,500), `MAX_TRADES_PER_DAY` (30 filled orders) and
-`MAX_DAILY_TURNOVER_PCT` (300% of the day's starting value). An order that would breach any of
-them is not sent and blocks further live orders until the next UTC day (ERROR event).
+Hard limits per instance: `MAX_ORDER_USD` (1,500), `MAX_TRADES_PER_DAY` (30 filled orders, each
+slice leg counts) and `MAX_DAILY_TURNOVER_PCT` (300% of the day's starting value). An order that
+would breach any of them is not sent and blocks further live orders until the next UTC day (one
+ERROR event). A rebalance interrupted by the block keeps its USDT and resumes the next day without
+using up its retries. Raising a limit in `.env` does not lift a block that already happened today.
+
+Other live safeguards worth knowing:
+
+- If the bot is killed in the middle of a rebalance, the restart resolves the order that was in
+  flight by its client order id, cancels stray open orders of the instance and finishes the
+  remaining part from the real balances - nothing is sent twice.
+- If an order's outcome cannot be determined (network loss right after sending), it stays "in
+  flight" and nothing else is sent for that decision until it is resolved.
+- A live decision taken while live execution was unavailable (e.g. failed startup checks, no
+  prices yet) is re-queued as soon as the executor is back.
+- Leftover USDT below `MIN_TRADE_USD` after a rebalance is treated as dust and spent first by the
+  next rebalance.
 
 Turning `S1K_LIVE` off (or removing `LIVE_CONFIRM`) ends the live period; paper continues. A later
 re-activation starts a new benchmark.

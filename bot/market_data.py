@@ -114,6 +114,31 @@ class JointBar:
         return (b + a) / 2.0
 
 
+def _r(x: float | None, nd: int) -> float | None:
+    return None if x is None else round(x, nd)
+
+
+def bar_fields(bar: JointBar, ema: float, dev: float) -> dict[str, Any]:
+    """Fields of a ``bars_*.jsonl`` record (floats rounded far below price precision)."""
+
+    def k(kl: Kline, sym: str) -> dict[str, float | None]:
+        bid, ask = bar.book[sym] if bar.book and sym in bar.book else (None, None)
+        return {"o": _r(kl.o, 8), "h": _r(kl.h, 8), "l": _r(kl.l, 8), "c": _r(kl.c, 8), "v": _r(kl.v, 4),
+                "bid": bid, "ask": ask}
+
+    return {
+        "theta": k(bar.theta, THETA),
+        "tfuel": k(bar.tfuel, TFUEL),
+        "ratio": _r(bar.ratio, 8),
+        "lr": _r(bar.lr, 10),
+        "ema3d": _r(ema, 10),
+        "ema3d_ratio": _r(math.exp(ema), 8),
+        "dev": _r(dev, 10),
+        "stale": bar.stale,
+        "synthetic": bar.synthetic,
+    }
+
+
 def join_klines(
     rows: dict[str, dict[int, Kline]],
     start_ms: int,

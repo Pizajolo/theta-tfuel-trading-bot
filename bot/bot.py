@@ -12,9 +12,7 @@ import argparse
 import asyncio
 import contextlib
 import fcntl
-import json
 import logging
-import math
 import os
 import signal
 import sys
@@ -34,8 +32,8 @@ from bot.config import (
 )
 from bot.execution_live import LiveExecutor
 from bot.instance import Instance, make_decision_id
-from bot.market_data import SYMBOLS, THETA, TFUEL, JointBar, MarketData
-from bot.portfolio import ASSET_OF, prices, theta_weight, trade_size, value_of
+from bot.market_data import SYMBOLS, THETA, TFUEL, JointBar, MarketData, bar_fields
+from bot.portfolio import prices, theta_weight, trade_size, value_of
 from bot.signals import MarketEma
 from bot.storage import Storage, read_json
 from bot.symbol_filters import SymbolFilters, parse_exchange_info
@@ -291,16 +289,7 @@ class Bot:
         ema, dev = self.market_ema.update(bar.ts_ms, bar.lr)
         if self.bars_logged_until is not None and bar.ts_ms <= self.bars_logged_until:
             return
-        th_b, th_a = bar.book[THETA] if bar.book else (None, None)
-        tf_b, tf_a = bar.book[TFUEL] if bar.book else (None, None)
-        k1, k2 = bar.theta, bar.tfuel
-        self.storage.write_bar(
-            bar.ts_ms,
-            theta={"o": k1.o, "h": k1.h, "l": k1.l, "c": k1.c, "v": k1.v, "bid": th_b, "ask": th_a},
-            tfuel={"o": k2.o, "h": k2.h, "l": k2.l, "c": k2.c, "v": k2.v, "bid": tf_b, "ask": tf_a},
-            ratio=bar.ratio, lr=bar.lr, ema3d=ema, ema3d_ratio=math.exp(ema), dev=dev, stale=bar.stale,
-            synthetic=bar.synthetic,
-        )
+        self.storage.write_bar(bar.ts_ms, **bar_fields(bar, ema, dev))
         self.bars_logged_until = bar.ts_ms
 
     def save_market_state(self) -> None:

@@ -142,14 +142,14 @@ class Portfolio:
         ex = v / hv - 1.0 if hv > 0 else 0.0
         out = {
             "variant": self.variant,
-            "bal": {a: self.bal.get(a, 0.0) for a in ASSETS},
-            "mid": {"THETA": px["THETA"], "TFUEL": px["TFUEL"]},
-            "value_usd": v,
-            "hodl_value_usd": hv,
-            "excess": ex,
-            "theta_equiv_tokens": self.hodl.get("THETA", 0.0) * (1.0 + ex),
-            "tfuel_equiv_tokens": self.hodl.get("TFUEL", 0.0) * (1.0 + ex),
-            "w": self.w(px),
+            "bal": {a: round(self.bal.get(a, 0.0), 8) for a in ASSETS},
+            "mid": {"THETA": round(px["THETA"], 8), "TFUEL": round(px["TFUEL"], 8)},
+            "value_usd": round(v, 6),
+            "hodl_value_usd": round(hv, 6),
+            "excess": round(ex, 10),
+            "theta_equiv_tokens": round(self.hodl.get("THETA", 0.0) * (1.0 + ex), 6),
+            "tfuel_equiv_tokens": round(self.hodl.get("TFUEL", 0.0) * (1.0 + ex), 6),
+            "w": round(self.w(px), 8),
         }
         if px.get("BNB"):
             out["mid"]["BNB"] = px["BNB"]

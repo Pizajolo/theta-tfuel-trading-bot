@@ -1,5 +1,3 @@
-import math
-from dataclasses import replace
 
 import pytest
 

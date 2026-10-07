@@ -214,10 +214,10 @@ class Instance:
         prim = self.primary()
         self.storage.write_signal(
             self.name, ts,
-            dev=sig.dev, entry=self.cfg.strategy.overlay_entry, exit=self.cfg.strategy.overlay_exit,
+            dev=round(sig.dev, 10), entry=self.cfg.strategy.overlay_entry, exit=self.cfg.strategy.overlay_exit,
             pos=sig.pos, pos_prev=sig.pos_prev, ladder_w=sig.ladder_w, w_target=sig.w_target,
-            w_current=prim.w(px) if prim else None, action=action,
-            ema3d=sig.ema, lr=sig.lr, stale=bar.stale, phase=phase,
+            w_current=round(prim.w(px), 8) if prim else None, action=action,
+            ema3d=round(sig.ema, 10), lr=round(sig.lr, 10), stale=bar.stale, phase=phase,
         )
         minute = decided_at // MINUTE_MS
         if self.started and minute % 5 == 0:

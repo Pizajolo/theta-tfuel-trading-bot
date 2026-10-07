@@ -99,3 +99,15 @@ def test_replay_start_window_and_nonempty_output_refused(tmp_path, fixture_files
     assert not (out / "instances" / "s1k" / "signals_2026-01-01.jsonl").exists()  # warm-up only
     with pytest.raises(SystemExit):
         run_replay(settings(tmp_path), [csv_path], ["s1k"], out_dir=out, progress=False)
+
+
+def test_per_year_report_splits_at_new_year(tmp_path):
+    src = tmp_path / "ny.csv"
+    write_csv(src, T0 - 2 * 86_400_000, 4 * 1440, seed=9)  # 2025-12-30 .. 2026-01-02
+    report = run_replay(settings(tmp_path), [src], ["s1k"], out_dir=tmp_path / "out", progress=False)
+    rows = sorted((r["year"], r["variant"], r["days"]) for r in report["years"])
+    assert [y for y, v, _ in rows if v == "touch"] == [2025, 2026]
+    days = {y: d for y, v, d in rows if v == "touch"}
+    assert 1.5 < days[2025] < 2.0 and 1.9 < days[2026] <= 2.0
+    first_2026 = next(r for r in report["years"] if r["year"] == 2026 and r["variant"] == "touch")
+    assert first_2026["start"] == "2026-01-01T00:00:00Z"
